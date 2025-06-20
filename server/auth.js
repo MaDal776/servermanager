@@ -1,12 +1,31 @@
 // 认证相关功能
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+
+// 确保从项目根目录加载.env文件
+const envPath = path.resolve(process.cwd(), '.env');
+const rootEnvPath = path.resolve(process.cwd(), '../.env');
+
+// 尝试加载.env文件，优先使用当前目录，如果不存在则尝试上级目录
+if (fs.existsSync(envPath)) {
+  require('dotenv').config({ path: envPath });
+  console.log('从当前目录加载环境变量:', envPath);
+} else if (fs.existsSync(rootEnvPath)) {
+  require('dotenv').config({ path: rootEnvPath });
+  console.log('从上级目录加载环境变量:', rootEnvPath);
+} else {
+  console.warn('未找到.env文件，将使用默认配置');
+  require('dotenv').config();
+}
 
 // 从环境变量中获取配置
 const adminUsername = process.env.ADMIN_USERNAME || 'admin';
 const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
 const jwtSecret = process.env.JWT_SECRET || 'server-manager-secret-key';
 const tokenExpiresIn = parseInt(process.env.TOKEN_EXPIRES_IN || '86400', 10);
+
+console.log("adminUsername", adminUsername);
 
 /**
  * 验证用户凭证
@@ -76,3 +95,4 @@ module.exports = {
   verifyToken,
   authMiddleware
 };
+
