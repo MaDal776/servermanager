@@ -196,7 +196,7 @@ sudo firewall-cmd --reload
 
 ### 7. 访问系统
 
-打开浏览器，访问您的域名或服务器IP：
+打开浏览器，访问您的域名或服务器IP：访问端口使用nginx代理的端口
 - http://your-domain.com 或 http://your-server-ip
 
 默认登录凭证：
