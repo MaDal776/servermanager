@@ -10,7 +10,7 @@ const SftpClient = require('ssh2-sftp-client');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { serverStore, commandStore, commandHistoryStore, fileOperationsStore } = require('./data-store');
+const { serverStore, commandStore, commandHistoryStore, fileOperationsStore, decrypt } = require('./data-store');
 const { validateCredentials, generateToken, authMiddleware } = require('./auth');
 
 // 创建Express应用
@@ -79,7 +79,18 @@ app.post('/api/connect', async (req, res) => {
     };
 
     if (authType === 'password') {
-      connectConfig.password = password;
+      // 如果密码是加密的，尝试解密
+      let decryptedPassword = password;
+      if (password) {
+        try {
+          // 尝试解密密码
+          decryptedPassword = decrypt(password);
+        } catch (e) {
+          // 如果解密失败，可能是因为密码已经是明文，保持原样
+          console.log('密码解密失败，将使用原始密码值');
+        }
+      }
+      connectConfig.password = decryptedPassword;
     } else if (authType === 'key') {
       try {
         connectConfig.privateKey = fs.readFileSync(keyPath, 'utf8');
@@ -219,9 +230,17 @@ app.post('/api/batch-execute', async (req, res) => {
 });
 
 // 文件上传 - 使用multer处理multipart/form-data
-app.post('/api/upload', upload.single('file'), async (req, res) => {
-  let localPath = null;
-  try {
+// 使用标准认证中间件保护文件上传端点
+app.post('/api/upload', authMiddleware, async (req, res) => {
+  // 处理文件上传
+  upload.single('file')(req, res, async function(err) {
+    if (err) {
+      return res.status(400).json({ success: false, message: `文件上传错误: ${err.message}` });
+    }
+    
+    // 认证已由 authMiddleware 处理，无需再次验证令牌
+    let localPath = null;
+    try {
     // 从表单字段获取参数
     const serverId = req.body.serverId;
     const remotePath = req.body.remotePath;
@@ -339,16 +358,33 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       message: `文件上传失败: ${error.message}. 请检查远程路径和权限。` 
     });
   }
+  });
 });
 
 
 // 文件下载 - 使用GET请求和查询参数支持浏览器直接下载
 app.get('/api/download', async (req, res) => {
   try {
-    const { serverId, remotePath } = req.query;
+    const { serverId, remotePath, token } = req.query;
     
     if (!serverId || !remotePath) {
       return res.status(400).json({ success: false, message: '缺少必要的参数' });
+    }
+
+    // 如果没有通过标准认证中间件，但提供了token参数，则手动验证token
+    if (!req.user && token) {
+      const { verifyToken } = require('./auth');
+      const decoded = verifyToken(token);
+      if (!decoded) {
+        return res.status(401).json({ error: '无效的认证令牌' });
+      }
+      // 验证通过，设置用户信息
+      req.user = decoded;
+    }
+
+    // 如果仍然没有用户信息，则表示未认证
+    if (!req.user) {
+      return res.status(401).json({ error: '未提供认证令牌' });
     }
 
     const ssh = sshConnections[serverId];
@@ -534,13 +570,26 @@ function parseNetworkUsage(netOutput) {
 }
 
 // 服务器数据持久化API
-// 获取所有服务器信息
+// 获取所有服务器信息 - 默认不解密密码
 app.get('/api/servers', (req, res) => {
   try {
-    const servers = serverStore.getServers();
+    // 使用修改后的 getServers 方法，不解密密码
+    const servers = serverStore.getServers(false);
     res.json({ success: true, data: servers });
   } catch (error) {
     console.error('获取服务器信息失败:', error);
+    res.status(500).json({ success: false, message: '获取服务器信息失败', error: error.message });
+  }
+});
+
+// 获取所有服务器信息 - 包含解密后的密码（仅在特殊情况下使用）
+app.get('/api/servers/with-decrypted-passwords', (req, res) => {
+  try {
+    // 使用 getServers 方法，并解密密码
+    const servers = serverStore.getServers(true);
+    res.json({ success: true, data: servers });
+  } catch (error) {
+    console.error('获取服务器信息(含解密密码)失败:', error);
     res.status(500).json({ success: false, message: '获取服务器信息失败', error: error.message });
   }
 });
@@ -800,3 +849,4 @@ if (require.main === module) {
   // 作为模块导入时，导出app而不启动服务器
   module.exports = { app, serverStore, commandStore, commandHistoryStore, fileOperationsStore };
 }
+

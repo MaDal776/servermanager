@@ -90,19 +90,26 @@ function writeDataFile(filename, data) {
 // 服务器信息相关操作
 const serverStore = {
   // 获取所有服务器信息
-  getServers() {
+  // 添加 decryptPasswords 参数，默认为 false，只有明确需要时才解密密码
+  getServers(decryptPasswords = false) {
     const servers = readDataFile(SERVERS_FILE);
-    // 解密敏感数据
-    return servers.map(server => {
-      if (server.authType === 'password' && server.password) {
-        try {
-          server.password = decrypt(server.password);
-        } catch (e) {
-          // 如果不是加密格式，保持原样
+    
+    // 只有当明确要求解密密码时才解密
+    if (decryptPasswords) {
+      return servers.map(server => {
+        if (server.authType === 'password' && server.password) {
+          try {
+            server.password = decrypt(server.password);
+          } catch (e) {
+            // 如果不是加密格式，保持原样
+          }
         }
-      }
-      return server;
-    });
+        return server;
+      });
+    }
+    
+    // 默认情况下不解密密码，直接返回原始数据
+    return servers;
   },
   
   // 保存所有服务器信息
@@ -254,5 +261,8 @@ module.exports = {
   serverStore,
   commandStore,
   commandHistoryStore,
-  fileOperationsStore
+  fileOperationsStore,
+  encrypt,
+  decrypt
 };
+
